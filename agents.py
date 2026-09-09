@@ -17,12 +17,19 @@ def _safe_json(text: str):
 
 def planner_agent(state: ResearchState) -> dict:
     query = state["research_query"]
-    prompt = f"""You are a research planner. Break this question into
-3-5 focused sub-questions covering the topic comprehensively.
+    prompt = f"""You are a senior research strategist. Your job is to decompose a broad research question
+into 4-5 precise, non-overlapping sub-questions that together give a COMPLETE picture of the topic.
 
-Question: {query}
+Rules:
+- Each sub-question must cover a DIFFERENT angle (e.g. mechanisms, applications, limitations, comparisons, recent developments)
+- Questions must be specific enough to search the web for — avoid vague or abstract questions
+- Do NOT repeat the same angle in different wording
+- Order them logically: fundamentals first, advanced topics last
 
-Return ONLY a JSON list of strings, no markdown, no preamble."""
+Topic: {query}
+
+Return ONLY a JSON array of strings. No markdown, no explanation, no preamble.
+Example format: ["Question 1?", "Question 2?", "Question 3?", "Question 4?"]"""
 
     response = model.invoke([HumanMessage(content=prompt)])
     try:
@@ -50,12 +57,21 @@ def researcher_agent(state: ResearchState) -> dict:
                 errors.append(f"No results: {question}")
                 continue
             context = "\n".join(f"Source: {r['url']}\nContent: {r['content']}" for r in results)
-            prompt = f"""Answer using the search results. Return ONLY JSON:
-{{"question": "...", "answer": "...", "sources": ["..."]}}
+            prompt = f"""You are a precise research analyst. Read the search results carefully and answer the question.
 
 Question: {question}
+
 Search Results:
-{context}"""
+{context}
+
+Instructions:
+- Extract ONLY information directly supported by the search results
+- Include specific names, numbers, dates, or technical terms when present
+- Note any limitations or caveats mentioned in the sources
+- Do NOT add knowledge from outside these search results
+
+Return ONLY valid JSON — no markdown fences, no extra text:
+{{"question": "<the original question>", "answer": "<comprehensive 2-4 sentence answer with specific facts>", "key_facts": ["<fact 1>", "<fact 2>", "<fact 3>"], "sources": ["<url1>", "<url2>"]}}"""
             response = model.invoke([HumanMessage(content=prompt)])
             findings.append(_safe_json(response.content))
         except json.JSONDecodeError:
@@ -97,23 +113,32 @@ Original findings (ground truth — do not contradict these):
 Return the FULLY revised markdown report. No preamble."""
     else:
         # First draft
-        prompt = f"""You are an expert technical writer. Write a comprehensive, well-structured
-research report on the topic below using ONLY the provided findings.
+        prompt = f"""You are an expert technical writer and researcher. Write a professional, in-depth research report.
 
 Topic: {query}
 
-Findings:
+Research Findings:
 {findings_block}
 
-Requirements:
-- Use markdown with clear headings (##, ###)
-- Open with an executive summary
-- One section per finding with inline citations [Source: URL]
-- Close with a 'Key Takeaways' section
-- Do NOT invent facts beyond the findings
-- Aim for ~600 words
+Report Structure (follow exactly):
+1. ## Executive Summary (3-4 sentences: what the topic is, why it matters, key conclusion)
+2. ## Background (1 short paragraph: context needed to understand the findings)
+3. One ## section per finding — use the finding's question as the section title
+   - Start with the core answer
+   - Expand with key facts and technical details from the finding
+   - Add inline citations like [Source](URL) for every claim
+4. ## Challenges & Limitations (synthesize limitations mentioned across findings)
+5. ## Key Takeaways (5-7 bullet points — concrete, specific, actionable insights)
+6. ## References (numbered list of all URLs used)
 
-Return ONLY the markdown text, no preamble."""
+Strict rules:
+- 700-900 words total
+- ONLY use facts from the provided findings — never invent
+- Every factual claim must have an inline citation
+- Use bold for key terms on first use
+- Write for an informed technical audience
+
+Return ONLY the markdown report. No preamble, no commentary."""
 
     report = model.invoke([HumanMessage(content=prompt)]).content.strip()
 
@@ -151,24 +176,28 @@ def reviewer_agent(state: ResearchState) -> dict:
             )],
         }
 
-    prompt = f"""You are a rigorous research editor. Evaluate this report against the original topic.
+    prompt = f"""You are a rigorous research editor with high standards. Score this report and decide if it needs revision.
 
-Topic: {query}
+Original Topic: {query}
 
-Report:
+Report to Review:
 {report}
 
-Respond with ONLY JSON — no markdown fences, no extra text:
+Score the report on these 7 criteria (each worth up to 1-10 points, give ONE overall score):
+1. Executive summary clarity — does it explain topic + why it matters in 3-4 sentences?
+2. Citation quality — is every factual claim backed by an inline [Source](URL)?
+3. Comprehensiveness — does it cover all major angles of the topic?
+4. Technical depth — does it include specific names, numbers, and technical terms?
+5. Structure — does it have Background, per-finding sections, Challenges, Key Takeaways, References?
+6. Accuracy — does it stick to facts from sources without inventing information?
+7. Writing quality — clear, professional, well-connected paragraphs?
+
+Respond with ONLY valid JSON — no markdown fences:
 {{
   "score": <integer 1-10>,
-  "approved": <true|false>,
-  "feedback": "<concise bullet-point notes for the writer, or empty string if approved>"
-}}
-
-Approve (approved=true, score >= 8) when the report:
-- Has a clear executive summary and 'Key Takeaways' section
-- Cites sources inline
-- Covers the topic comprehensively without inventing facts"""
+  "approved": <true if score >= 8, false otherwise>,
+  "feedback": "<if not approved: specific bullet points naming EXACTLY what is missing or weak — reference section names and criteria numbers. If approved: empty string>"
+}}"""
 
     try:
         raw    = model.invoke([HumanMessage(content=prompt)]).content
