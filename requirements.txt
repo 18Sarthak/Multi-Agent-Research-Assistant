@@ -1,0 +1,15 @@
+langchain==1.4.0
+langchain-classic==1.0.8
+langchain-community==0.4.2
+langchain-core==1.6.2
+langchain-openai==1.6.1
+langchain-protocol==0.0.19
+langchain-tavily==0.2.18
+langchain-text-splitters==1.1.2
+langgraph==1.2.11
+langgraph-checkpoint==4.2.0
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.4
+openai==3.10.0
+python-dotenv==1.2.3
+tavily-python==0.8.1
