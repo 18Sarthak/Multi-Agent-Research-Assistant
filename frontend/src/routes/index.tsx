@@ -36,9 +36,9 @@ type View = "home" | "pipeline" | "report";
 type AgentStatus = "pending" | "running" | "done";
 
 const examples = [
-  "What is RLVR?",
-  "How will small language models evolve?",
-  "Compare RAG and long-context retrieval",
+  "How does quantum computing threaten current encryption?",
+  "What is the future of autonomous AI agents?",
+  "How will AI transform drug discovery?",
 ];
 
 const AGENT_META = [
@@ -63,7 +63,7 @@ const initialAgents = (): AgentState[] =>
 
 function ResearchApp() {
   const [view, setView]         = useState<View>("home");
-  const [query, setQuery]       = useState("What is RLVR?");
+  const [query, setQuery]       = useState("");
   const [agents, setAgents]     = useState<AgentState[]>(initialAgents());
   const [report, setReport]     = useState("");
   const [error, setError]       = useState<string | null>(null);
