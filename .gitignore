@@ -1,5 +1,6 @@
 # Environment & secrets
 .env
+backend/.env
 
 # Python
 __pycache__/
@@ -12,3 +13,9 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.output/
+frontend/.nitro/
