@@ -474,15 +474,31 @@ function ReportView({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              h1: ({ children }) => <h1 className="mb-6 mt-4 font-mono text-3xl font-bold text-foreground sm:text-4xl">{children}</h1>,
               h2: ({ children }) => <h2 className="mb-5 mt-12 border-b border-border pb-3 font-mono text-xl font-semibold first:mt-0 sm:text-2xl">{children}</h2>,
+              h3: ({ children }) => <h3 className="mb-3 mt-8 font-mono text-base font-semibold text-foreground/90">{children}</h3>,
               p:  ({ children }) => <p className="mb-5 text-[15px] leading-8 text-foreground/85">{children}</p>,
               ul: ({ children }) => <ul className="mb-6 space-y-3 text-[15px] leading-7 text-foreground/85">{children}</ul>,
+              ol: ({ children }) => <ol className="mb-6 list-decimal space-y-3 pl-6 text-[15px] leading-7 text-foreground/85">{children}</ol>,
               li: ({ children }) => <li className="ml-5 list-disc marker:text-primary">{children}</li>,
               a:  ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" title={href} className="border-b border-primary/50 font-mono text-xs text-primary transition-colors hover:border-primary">{children}</a>,
+              img: ({ src, alt }) => (
+                <figure className="my-8">
+                  <img
+                    src={src}
+                    alt={alt ?? ""}
+                    className="mx-auto max-h-96 max-w-full rounded border border-border object-contain shadow-lg"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                  {alt && <figcaption className="mt-3 text-center font-mono text-xs text-muted-foreground">{alt}</figcaption>}
+                </figure>
+              ),
               code: ({ className, children }) => className
                 ? <code className={className}>{children}</code>
                 : <code className="border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-info">{children}</code>,
               pre: ({ children }) => <pre className="mb-7 overflow-x-auto border border-border bg-background p-5 font-mono text-sm leading-7 text-info">{children}</pre>,
+              hr: () => <hr className="my-8 border-border" />,
+              blockquote: ({ children }) => <blockquote className="my-5 border-l-2 border-primary/50 pl-4 italic text-muted-foreground">{children}</blockquote>,
             }}
           >
             {report}

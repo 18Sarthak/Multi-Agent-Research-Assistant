@@ -45,7 +45,7 @@ Example format: ["Question 1?", "Question 2?", "Question 3?", "Question 4?"]"""
     }
 
 # Researcher
-search_tool = TavilySearch(max_results=3)
+search_tool = TavilySearch(max_results=4, include_images=True)
 
 def researcher_agent(state: ResearchState) -> dict:
     findings, errors = [], []
@@ -53,6 +53,17 @@ def researcher_agent(state: ResearchState) -> dict:
         try:
             raw = search_tool.invoke({"query": question})
             results = raw.get("results", []) if isinstance(raw, dict) else raw
+
+            # Collect image URLs returned by Tavily (deduplicated, up to 2 per question)
+            raw_images = raw.get("images", []) if isinstance(raw, dict) else []
+            image_urls = []
+            for img in raw_images:
+                url = img.get("url") if isinstance(img, dict) else img
+                if url and url not in image_urls:
+                    image_urls.append(url)
+                if len(image_urls) >= 2:
+                    break
+
             if not results:
                 errors.append(f"No results: {question}")
                 continue
@@ -73,7 +84,9 @@ Instructions:
 Return ONLY valid JSON — no markdown fences, no extra text:
 {{"question": "<the original question>", "answer": "<comprehensive 2-4 sentence answer with specific facts>", "key_facts": ["<fact 1>", "<fact 2>", "<fact 3>"], "sources": ["<url1>", "<url2>"]}}"""
             response = model.invoke([HumanMessage(content=prompt)])
-            findings.append(_safe_json(response.content))
+            finding = _safe_json(response.content)
+            finding["images"] = image_urls   # attach images to this finding
+            findings.append(finding)
         except json.JSONDecodeError:
             errors.append(f"Bad JSON for: {question}")
         except Exception as e:
@@ -95,7 +108,13 @@ def writer_agent(state: ResearchState) -> dict:
     query    = state["research_query"]
 
     findings_block = "\n\n".join(
-        f"### {f['question']}\n{f['answer']}\nSources: {', '.join(f.get('sources', []))}"
+        "### {q}\n{a}\nKey Facts:\n{kf}\nImages: {imgs}\nSources: {src}".format(
+            q=f["question"],
+            a=f["answer"],
+            kf="\n".join(f"- {kf}" for kf in f.get("key_facts", [])),
+            imgs=", ".join(f.get("images", [])) or "none",
+            src=", ".join(f.get("sources", [])),
+        )
         for f in findings
     )
 
@@ -113,32 +132,77 @@ Original findings (ground truth — do not contradict these):
 Return the FULLY revised markdown report. No preamble."""
     else:
         # First draft
-        prompt = f"""You are an expert technical writer and researcher. Write a professional, in-depth research report.
+        prompt = f"""You are an expert academic researcher and technical writer. Write a formal research paper on the given topic using the findings provided.
 
 Topic: {query}
 
-Research Findings:
+Research Findings (each includes question, answer, key facts, image URLs, and sources):
 {findings_block}
 
-Report Structure (follow exactly):
-1. ## Executive Summary (3-4 sentences: what the topic is, why it matters, key conclusion)
-2. ## Background (1 short paragraph: context needed to understand the findings)
-3. One ## section per finding — use the finding's question as the section title
-   - Start with the core answer
-   - Expand with key facts and technical details from the finding
-   - Add inline citations like [Source](URL) for every claim
-4. ## Challenges & Limitations (synthesize limitations mentioned across findings)
-5. ## Key Takeaways (5-7 bullet points — concrete, specific, actionable insights)
-6. ## References (numbered list of all URLs used)
+─────────────────────────────────────────────
+PAPER FORMAT — follow this exact academic structure:
+─────────────────────────────────────────────
 
-Strict rules:
-- 700-900 words total
-- ONLY use facts from the provided findings — never invent
-- Every factual claim must have an inline citation
-- Use bold for key terms on first use
-- Write for an informed technical audience
+# [Paper Title — a concise, descriptive academic title for the topic]
 
-Return ONLY the markdown report. No preamble, no commentary."""
+**Authors:** AI Research Pipeline  
+**Date:** {__import__('datetime').date.today().strftime('%B %Y')}  
+**Keywords:** [5-7 relevant keywords comma-separated]
+
+---
+
+## Abstract
+*(150-200 words: problem statement, methodology, key findings, and conclusion — written in past tense)*
+
+---
+
+## 1. Introduction
+*(2-3 paragraphs: motivate the topic, state why it matters, outline what this paper covers)*
+
+## 2. Background & Related Work
+*(2-3 paragraphs: prior work, historical context, how this topic fits into the broader field)*
+
+## 3. Core Concepts & Terminology
+*(Define every key technical term precisely. Use ### sub-headings for each concept.)*
+
+## 4. [Section per Finding — rename each heading to a substantive academic title]
+*For EACH finding, create a numbered section (4.1, 4.2, etc.) with:*
+- **Opening paragraph**: direct answer to the research sub-question
+- **Detailed analysis**: ALL key facts, numbers, dates — cite every claim inline as [Author/Site](URL)
+- **Figure** (if images are available for this finding): embed as:
+  `![Figure N: Brief descriptive caption](image_url)`
+  Place the figure right after the paragraph that references it.
+- **Comparison/contrast** with related approaches where relevant
+- **Sub-section summary**: 2-3 sentence synthesis
+
+## 5. Discussion
+*(2-3 paragraphs: synthesize findings, identify patterns, connect insights across sections)*
+
+## 6. Limitations
+*(One paragraph per limitation — explain the *root cause* of each limitation, not just its existence)*
+
+## 7. Future Directions
+*(Numbered list of 4-6 concrete open research questions, each with 2-3 sentences of explanation)*
+
+## 8. Conclusion
+*(1 solid paragraph: restate the problem, summarize what was learned, state the significance)*
+
+## References
+*(Numbered list: [N] Author/Source. "Title or description." URL)*
+
+─────────────────────────────────────────────
+STRICT RULES:
+- **Minimum 2000 words** — this is an academic paper, not a summary
+- ONLY use facts from the provided findings — never hallucinate
+- Every factual claim must have an inline citation [Source](URL)
+- Embed images using `![Figure N: caption](url)` — use image URLs from findings; skip if none available
+- Use **bold** for key terms on first use, `code` for formulas/identifiers
+- Use sub-headings (###) freely within sections for scanability
+- Paragraphs must be 3-5 sentences — no one-liners
+- Write in formal academic tone (third person, past tense for methods, present for facts)
+- Section 4 sub-sections should be numbered: 4.1, 4.2, 4.3, etc.
+
+Return ONLY the markdown paper. No preamble, no meta-commentary."""
 
     report = model.invoke([HumanMessage(content=prompt)]).content.strip()
 
