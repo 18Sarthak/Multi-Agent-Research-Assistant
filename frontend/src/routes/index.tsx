@@ -432,7 +432,8 @@ function ReportView({
   const reviewMsg    = agents[3]?.output ?? "";
 
   // Extract score from reviewer output e.g. "Report approved. Score: 9/10"
-  const scoreMatch = reviewMsg.match(/(\d+)\/10/);
+  // Also handles cap-reached message which has no score number
+  const scoreMatch = reviewMsg.match(/Score:\s*(\d+)\/10/i) ?? reviewMsg.match(/(\d+)\/10/);
   const score: string = scoreMatch?.[1] ?? "–";
 
   return (

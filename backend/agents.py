@@ -5,15 +5,43 @@ from langchain_tavily import TavilySearch
 from config import model
 from state import ResearchState
 
+import re as _re
+
 def _safe_json(text: str):
-    """Strip markdown fences models love to add, then parse."""
+    """Parse JSON from LLM output robustly with multiple fallback strategies."""
     text = text.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        text = text.split("\n", 1)[1] if "\n" in text else text
-        if text.lower().startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+
+    # Strategy 1: strip markdown fences then parse directly
+    clean = text
+    if clean.startswith("```"):
+        clean = clean.strip("`").strip()
+        if clean.lower().startswith("json"):
+            clean = clean[4:].strip()
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: extract the first {...} block (handles trailing text / preamble)
+    m = _re.search(r"\{[\s\S]*\}", text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 3: regex-extract individual fields from raw text as last resort
+    score_m    = _re.search(r'"?score"?\s*[=:]\s*(\d+)', text, _re.I)
+    approved_m = _re.search(r'"?approved"?\s*[=:]\s*(true|false)', text, _re.I)
+    feedback_m = _re.search(r'"?feedback"?\s*[=:]\s*"([^"]*)"', text, _re.I)
+
+    if score_m or approved_m:
+        score    = int(score_m.group(1)) if score_m else 5
+        approved = approved_m.group(1).lower() == "true" if approved_m else score >= 8
+        feedback = feedback_m.group(1) if feedback_m else ""
+        return {"score": score, "approved": approved, "feedback": feedback}
+
+    raise ValueError(f"Could not extract JSON from reviewer output: {text[:200]}")
 
 def planner_agent(state: ResearchState) -> dict:
     query = state["research_query"]
@@ -271,7 +299,7 @@ Respond with ONLY valid JSON — no markdown fences:
         score    = review.get("score", "?")
     except Exception:
         # Bad JSON → approve to avoid an infinite loop
-        approved, feedback, score = True, "", "parse-error"
+        approved, feedback, score = True, "", 0
 
     new_count = review_count + 1
 

@@ -19,8 +19,8 @@
  */
 
 @theme inline {
-  --font-sans: "Work Sans", sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  --font-sans: "Source Serif 4", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
