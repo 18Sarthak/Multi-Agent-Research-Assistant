@@ -130,16 +130,28 @@ Return ONLY valid JSON — no markdown fences, no extra text:
 
 # ── Writer ────────────────────────────────────────────────────────────────────
 
+def _invoke(prompt: str) -> str:
+    """Helper: call model and return stripped content."""
+    return model.invoke([HumanMessage(content=prompt)]).content.strip()
+
+
 def writer_agent(state: ResearchState) -> dict:
-    """Turn research findings into a polished markdown report."""
+    """Turn research findings into a polished markdown report.
+
+    Uses a *sectional* approach: each major section is generated in a
+    separate LLM call so the small 11b model can focus on one task at a
+    time, then the sections are stitched into a single document.
+    """
     findings = state["research_findings"]
     query    = state["research_query"]
+    today    = __import__('datetime').date.today().strftime('%B %Y')
 
+    # ── Build a compact findings summary used across all section prompts ────
     findings_block = "\n\n".join(
-        "### {q}\n{a}\nKey Facts:\n{kf}\nImages: {imgs}\nSources: {src}".format(
+        "Q: {q}\nA: {a}\nFacts: {kf}\nImages: {imgs}\nSources: {src}".format(
             q=f["question"],
             a=f["answer"],
-            kf="\n".join(f"- {kf}" for kf in f.get("key_facts", [])),
+            kf=" | ".join(f.get("key_facts", [])),
             imgs=", ".join(f.get("images", [])) or "none",
             src=", ".join(f.get("sources", [])),
         )
@@ -148,96 +160,125 @@ def writer_agent(state: ResearchState) -> dict:
 
     feedback = state.get("review_feedback", "")
     if feedback:
-        # Revision pass — tell the model exactly what to fix
-        prompt = f"""You are revising a research report based on reviewer feedback.
+        # Revision pass — single call with targeted feedback
+        existing = state.get("final_report", "")
+        prompt = f"""You are a research editor. Revise the report below based on the feedback.
 
-Reviewer feedback:
+Feedback:
 {feedback}
 
-Original findings (ground truth — do not contradict these):
+Research facts (do not contradict):
 {findings_block}
 
-Return the FULLY revised markdown report. No preamble."""
+Report to revise:
+{existing}
+
+Return ONLY the fully revised markdown report."""
+        report = _invoke(prompt)
     else:
-        # First draft
-        prompt = f"""You are an expert academic researcher and technical writer. Write a formal research paper on the given topic using the findings provided.
+        # ── Sectional first-draft approach ─────────────────────────────────
+        # Section 1: Title block + Abstract + Introduction
+        s1 = _invoke(f"""Write the opening of an academic research paper on: "{query}"
 
-Topic: {query}
-
-Research Findings (each includes question, answer, key facts, image URLs, and sources):
+Research findings summary:
 {findings_block}
 
-─────────────────────────────────────────────
-PAPER FORMAT — follow this exact academic structure:
-─────────────────────────────────────────────
-
-# [Paper Title — a concise, descriptive academic title for the topic]
-
-**Authors:** AI Research Pipeline  
-**Date:** {__import__('datetime').date.today().strftime('%B %Y')}  
-**Keywords:** [5-7 relevant keywords comma-separated]
-
+Write ONLY these parts (no other sections):
+# [Descriptive paper title]
+**Authors:** AI Research Pipeline  **Date:** {today}
+**Keywords:** [5-7 comma-separated keywords]
 ---
-
 ## Abstract
-*(150-200 words: problem statement, methodology, key findings, and conclusion — written in past tense)*
-
+Write 150-200 words covering: what was studied, how, key findings, conclusion. Past tense.
 ---
-
 ## 1. Introduction
-*(2-3 paragraphs: motivate the topic, state why it matters, outline what this paper covers)*
+Write 3 paragraphs: why this topic matters, what gap it addresses, what this paper covers.
 
+Use markdown. No commentary outside the sections.""")
+
+        # Section 2: Background + Core Concepts
+        s2 = _invoke(f"""Continue an academic paper on: "{query}"
+
+Research findings:
+{findings_block}
+
+Write ONLY these two sections:
 ## 2. Background & Related Work
-*(2-3 paragraphs: prior work, historical context, how this topic fits into the broader field)*
+Write 3 paragraphs on historical context, prior work, and how this topic fits the broader field.
 
 ## 3. Core Concepts & Terminology
-*(Define every key technical term precisely. Use ### sub-headings for each concept.)*
+Define each key technical term as a ### subsection (2-3 sentences each). Include at least 4 terms.
 
-## 4. [Section per Finding — rename each heading to a substantive academic title]
-*For EACH finding, create a numbered section (4.1, 4.2, etc.) with:*
-- **Opening paragraph**: direct answer to the research sub-question
-- **Detailed analysis**: ALL key facts, numbers, dates — cite every claim inline as [Author/Site](URL)
-- **Figure** (if images are available for this finding): embed as:
-  `![Figure N: Brief descriptive caption](image_url)`
-  Place the figure right after the paragraph that references it.
-- **Comparison/contrast** with related approaches where relevant
-- **Sub-section summary**: 2-3 sentence synthesis
+Use markdown. Cite sources as [Name](URL) when referencing facts.""")
 
+        # Section 3: Per-finding analysis sections (one call per finding)
+        finding_sections = []
+        for i, f in enumerate(findings, start=1):
+            imgs = f.get("images", [])
+            img_note = f"Include this figure: ![Figure {i}: relevant caption]({imgs[0]})" if imgs else "No image available for this finding."
+            fs = _invoke(f"""Write section 4.{i} of an academic paper on: "{query}"
+
+This section covers: {f['question']}
+
+Answer: {f['answer']}
+Key facts: {' | '.join(f.get('key_facts', []))}
+Sources: {', '.join(f.get('sources', []))}
+{img_note}
+
+Write:
+### 4.{i} [Academic title summarising this finding]
+Paragraph 1: Directly answer the research sub-question (3-5 sentences).
+Paragraph 2: Analyse the key facts with inline citations as [Source](URL).
+{"Insert the figure markdown here on its own line." if imgs else ""}
+Paragraph 3: Compare/contrast with related approaches (2-3 sentences).
+**Summary:** 2-sentence synthesis.
+
+Return ONLY this subsection in markdown.""")
+            finding_sections.append(fs)
+
+        s3_header = "\n## 4. Research Findings\n"
+        s3 = s3_header + "\n\n".join(finding_sections)
+
+        # Section 4: Discussion + Limitations + Future Directions + Conclusion
+        s4 = _invoke(f"""Write the closing sections of an academic paper on: "{query}"
+
+Research findings summary:
+{findings_block}
+
+Write ONLY these four sections:
 ## 5. Discussion
-*(2-3 paragraphs: synthesize findings, identify patterns, connect insights across sections)*
+3 paragraphs synthesising patterns across all findings and their broader significance.
 
 ## 6. Limitations
-*(One paragraph per limitation — explain the *root cause* of each limitation, not just its existence)*
+2 paragraphs: one on data/source limitations, one on model/methodology limitations. Explain root causes.
 
 ## 7. Future Directions
-*(Numbered list of 4-6 concrete open research questions, each with 2-3 sentences of explanation)*
+Numbered list of 4 concrete open research questions, each with 2-3 sentences of explanation.
 
 ## 8. Conclusion
-*(1 solid paragraph: restate the problem, summarize what was learned, state the significance)*
+1 solid paragraph restating the problem, summarising insights, and stating significance.
 
-## References
-*(Numbered list: [N] Author/Source. "Title or description." URL)*
+Use markdown. No commentary outside the sections.""")
 
-─────────────────────────────────────────────
-STRICT RULES:
-- **Minimum 2000 words** — this is an academic paper, not a summary
-- ONLY use facts from the provided findings — never hallucinate
-- Every factual claim must have an inline citation [Source](URL)
-- Embed images using `![Figure N: caption](url)` — use image URLs from findings; skip if none available
-- Use **bold** for key terms on first use, `code` for formulas/identifiers
-- Use sub-headings (###) freely within sections for scanability
-- Paragraphs must be 3-5 sentences — no one-liners
-- Write in formal academic tone (third person, past tense for methods, present for facts)
-- Section 4 sub-sections should be numbered: 4.1, 4.2, 4.3, etc.
+        # Section 5: References
+        all_sources = []
+        seen = set()
+        for f in findings:
+            for src in f.get("sources", []):
+                if src not in seen:
+                    seen.add(src)
+                    all_sources.append(src)
 
-Return ONLY the markdown paper. No preamble, no meta-commentary."""
+        refs = "\n## References\n" + "\n".join(
+            f"[{i}] {src}" for i, src in enumerate(all_sources, 1)
+        )
 
-    report = model.invoke([HumanMessage(content=prompt)]).content.strip()
+        report = "\n\n".join([s1, s2, s3, s4, refs])
 
     return {
         "final_report": report,
         "current_step": "reviewing",
-        "messages": [AIMessage(content="Draft report written.", name="writer")],
+        "messages": [AIMessage(content=f"Draft report written ({len(report.split())} words).", name="writer")],
     }
 
 
