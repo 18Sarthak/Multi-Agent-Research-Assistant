@@ -184,6 +184,12 @@ async def research(req: ResearchRequest):
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
+@app.get("/")
+async def root():
+    """Root endpoint — keeps Render's health check happy."""
+    return {"status": "ok", "service": "Research Assistant API"}
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "timestamp": time.time()}
@@ -193,4 +199,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=False)
